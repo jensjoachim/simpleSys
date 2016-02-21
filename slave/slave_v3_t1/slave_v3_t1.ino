@@ -21,19 +21,7 @@ byte addresses[][6] = {"1Node","2Node"};
 #define BROAD_CH    0
 #define PRIVATE_CH  10
 
-byte nodeNumber = 3;
-
-// Data structures
-struct dataPackage
-{
-  unsigned int slaveID;
-  unsigned int pkID;
-  int someData1;
-  int someData2;
-};
-typedef struct dataPackage DataPackage;
-DataPackage packageToSend = {0,0,0,0};
-unsigned int packageCnt = 0;
+byte nodeNumber = 2;
 
 // Used to control whether this node is sending or receiving
 bool role = 0;
@@ -71,15 +59,17 @@ void loop() {
   byte req = nodeNumber | 0xF0;
   radio.stopListening();
   radio.write(&req, sizeof(byte));   
-  radio.startListening(); 
   Serial.print(F("Now sending: "));  
   Serial.print(req);     
   Serial.print(F("... Waiting for ack... "));     
 
   // CLEAR CHANNEL MAYBE!!!
 
+  // Change channel
+  switchToPrivateCH();
   // Wait for ack
-  bool privateSession = false;
+  radio.startListening(); 
+  // Read ack
   if (waitForDataTO()) {                                    
       Serial.println(F("Did not receive ack: FAILED!"));
   }else{
@@ -87,52 +77,14 @@ void loop() {
       radio.read( &ack, sizeof(byte) );
       if (req == ack) {
         Serial.println(F("Connection Established: SUCCESS!"));
-        privateSession = true;
       } else {
         Serial.println(F("Received wrong ack: FAILED!"));
       }  
   }
+
+  // Change to broadcast channel
   radio.stopListening();
-
-  if(privateSession) {
-    // Wait for host the change channel and clear buffer
-    delay(50); 
-    // Change channel
-    switchToPrivateCH();
-
-    for(int i = 0; i < 3; i++) {
-      // Set up data
-      packageToSend.slaveID = nodeNumber;
-      packageToSend.pkID = packageCnt;
-      packageToSend.someData1 = 1337;
-      packageToSend.someData2 = 12321;
-      // Send data
-      Serial.print(F("Sending data: "));
-      Serial.print(packageCnt);
-      Serial.print(F("... "));
-      //int hmm = sizeof(packageToSend;
-      Serial.print(sizeof(packageToSend));
-      if(!radio.write( &packageToSend, sizeof(packageToSend))) {
-        Serial.println(F("FAILED!"));
-      } else {
-        Serial.println(F("SUCCESS!"));
-        packageCnt++;
-      }
-      // Read ack and control
-      radio.startListening();
-       
-
-      
-      radio.stopListening();
-    }
-
-    
-    // Change channel
-    switchToBroadcastCH();
-    radio.startListening(); 
-  }
-
-
+  switchToBroadcastCH();
 
   delay(2000);
   

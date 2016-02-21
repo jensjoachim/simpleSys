@@ -27,6 +27,7 @@ TMRh20 2014 - Updated to work with optimized RF24 Arduino library
 #include <RF24/RF24.h>
 
 using namespace std;
+typedef unsigned char byte;
 //
 // Hardware configuration
 // Configure the appropriate pins for your connections
@@ -75,18 +76,35 @@ RF24 radio(22,0);
 
 /********** User Config *********/
 // Assign a unique identifier for this node, 0 or 1
-bool radioNumber = 1;
+//bool radioNumber = 1;
+
+#define BROAD_CH    0
+#define PRIVATE_CH  10
+
+// Data structures
+struct dataPackage
+{
+  unsigned short int slaveID;
+  unsigned short int pkID;
+  short int someData1;
+  short int someData2;
+};
+typedef struct dataPackage DataPackage;
 
 /********************************/
 
 // Radio pipe addresses for the 2 nodes to communicate.
 const uint8_t pipes[][6] = {"1Node","2Node"};
 
+// Interfaces
+void switchToPrivateCH();
+void switchToBroadcastCH();
+
 
 int main(int argc, char** argv){
 
-  bool role_ping_out = true, role_pong_back = false;
-  bool role = role_pong_back;
+//  bool role_ping_out = true, role_pong_back = false;
+//  bool role = role_pong_back;
 
   cout << "RF24/examples/GettingStarted/\n";
 
@@ -95,12 +113,16 @@ int main(int argc, char** argv){
 
   // optionally, increase the delay between retries & # of retries
   radio.setRetries(15,15);
+  
+  // Set channel
+  switchToBroadcastCH();
+  
   // Dump the configuration of the rf unit for debugging
   radio.printDetails();
 
 
 /********* Role chooser ***********/
-
+/*
   printf("\n ************ Role Setup ***********\n");
   string input = "";
   char myChar = {0};
@@ -115,23 +137,90 @@ int main(int argc, char** argv){
 		role = role_ping_out;
 	}
   }
+  */
 /***********************************/
   // This simple sketch opens two pipes for these two nodes to communicate
   // back and forth.
 
+  /*
     if ( !radioNumber )    {
       radio.openWritingPipe(pipes[0]);
       radio.openReadingPipe(1,pipes[1]);
     } else {
+		*/
       radio.openWritingPipe(pipes[1]);
       radio.openReadingPipe(1,pipes[0]);
-    }
+    //}
 	
 	radio.startListening();
 	
 	// forever loop
 	while (1)
 	{
+		// Wait for request
+		if ( radio.available() )
+		{
+			// Fetch the last request
+			char got_req;
+			while(radio.available()){
+				radio.read( &got_req, sizeof(char) );
+			}
+			
+			printf("Got request: %i... Sending ack... \n",got_req);
+			  //cout << "Tjaa" << endl;
+			
+			
+			radio.stopListening();
+			
+			// Send ack 
+			radio.write( &got_req, sizeof(char) );
+			
+			// Change channel
+			switchToPrivateCH();
+			
+			// MAYBE CLEAR READ BUFFER
+			byte someCrap;
+			while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
+			
+			// Wait for incoming data
+			radio.startListening();
+			
+			for(int i = 0; i < 3; i++) {
+				unsigned long started_waiting_at = millis();
+				bool timeout = false;
+				while ( ! radio.available() && ! timeout ) {
+					if (millis() - started_waiting_at > 500 )
+						timeout = true;
+				}
+
+				if ( timeout )
+				{
+					printf("Failed, response timed out.\n");
+				}
+				else
+				{
+					// Grab the response, compare, and send to debugging spew
+					DataPackage packageToSend;
+					radio.read( &packageToSend, sizeof(packageToSend) );
+
+					
+					// Spew it
+					printf("Slave ID: %u\n",packageToSend.slaveID);
+					printf("Package ID: %u\n",packageToSend.pkID);
+					printf("Data1: %i\n",packageToSend.someData1);
+					printf("Data2: %i\n",packageToSend.someData2);
+
+				}
+			}
+	
+			// Change channel
+			switchToBroadcastCH();
+			radio.startListening();
+
+		}
+
+		
+		/*
 		if (role == role_ping_out)
 		{
 			// First, stop listening so we can talk.
@@ -208,9 +297,25 @@ int main(int argc, char** argv){
 			}
 		
 		}
+		*/
+		delay(200); // release pressure from CPU
 
 	} // forever loop
 
   return 0;
 }
 
+void switchToPrivateCH() {
+  // Set channel
+  radio.setChannel(PRIVATE_CH);
+  // Enable acknowledge
+  radio.setAutoAck(true);
+  //radio.setAutoAck(false);
+}
+
+void switchToBroadcastCH() {
+  // Set channel
+  radio.setChannel(BROAD_CH);
+  // Disable acknowledge
+  radio.setAutoAck(false);
+}
