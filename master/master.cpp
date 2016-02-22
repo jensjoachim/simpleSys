@@ -78,6 +78,8 @@ RF24 radio(22,0);
 // Assign a unique identifier for this node, 0 or 1
 //bool radioNumber = 1;
 
+enum command { NoCMD, Stop, Get };
+
 #define BROAD_CH    0
 #define PRIVATE_CH  10
 
@@ -99,6 +101,7 @@ const uint8_t pipes[][6] = {"1Node","2Node"};
 // Interfaces
 void switchToPrivateCH();
 void switchToBroadcastCH();
+bool waitForDataTO();
 
 
 int main(int argc, char** argv){
@@ -178,13 +181,69 @@ int main(int argc, char** argv){
 			// Change channel
 			switchToPrivateCH();
 			
+			// Wait for the other side to clear buffer
+			delay(100);
+			
 			// MAYBE CLEAR READ BUFFER
 			byte someCrap;
 			while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
+		
 			
 			// Wait for incoming data
+			//radio.startListening();
+			
+			int dataCnt = 10;
+			
+			for(int i = 1; i <= dataCnt; i++) {
+				// Send command
+				command cmd = Get;
+				radio.write( &cmd, sizeof(cmd) );
+				radio.startListening();
+				
+				// Receive data package
+				/*
+				unsigned long started_waiting_at = millis();
+				bool timeout = false;
+				while ( ! radio.available() && ! timeout ) {
+					if (millis() - started_waiting_at > 500 )
+						timeout = true;
+				}
+				*/
+
+				//if ( timeout )
+				if ( waitForDataTO() )
+				{
+					printf("Failed, response timed out.\n");
+				}
+				else
+				{
+					// Grab the response, compare, and send to debugging spew
+					DataPackage packageToSend;
+					radio.read( &packageToSend, sizeof(packageToSend) );
+					
+
+					
+					// Spew it
+					printf("Slave ID: %u,  Package ID: %u\n",packageToSend.slaveID,packageToSend.pkID);
+					//printf("Package ID: %u\n",packageToSend.pkID);
+					//printf("Data1: %i\n",packageToSend.someData1);
+					//printf("Data2: %i\n",packageToSend.someData2);
+
+				}
+				
+				delay(20);
+				radio.stopListening();
+				//command cmd = Stop;
+				//command cmd = NoCMD;
+				
+			}
+			
+			command cmd = Stop;
+			radio.write( &cmd, sizeof(cmd) );
 			radio.startListening();
 			
+			
+			/*
 			for(int i = 0; i < 3; i++) {
 				unsigned long started_waiting_at = millis();
 				bool timeout = false;
@@ -212,6 +271,7 @@ int main(int argc, char** argv){
 
 				}
 			}
+			*/
 	
 			// Change channel
 			switchToBroadcastCH();
@@ -318,4 +378,16 @@ void switchToBroadcastCH() {
   radio.setChannel(BROAD_CH);
   // Disable acknowledge
   radio.setAutoAck(false);
+}
+
+bool waitForDataTO() {
+  // Wait here until we get a response, or timeout (250ms)
+  unsigned long started_waiting_at = millis();
+  bool timeout = false;
+  while ( ! radio.available() && ! timeout ) {
+    if (millis() - started_waiting_at > 500 ) {
+      timeout = true;
+    } 
+  }
+  return timeout;
 }
