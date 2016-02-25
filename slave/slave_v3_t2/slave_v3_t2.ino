@@ -16,12 +16,26 @@ bool radioNumber;
 RF24 radio(7,8);
 /**********************************************************/
 
+enum command { NoCMD, Stop, Get };
+
 byte addresses[][6] = {"1Node","2Node"};
 
 #define BROAD_CH    0
 #define PRIVATE_CH  10
 
-byte nodeNumber = 2;
+byte nodeNumber = 4;
+
+// Data structures
+struct dataPackage
+{
+  unsigned int slaveID;
+  unsigned int pkID;
+  int someData1;
+  int someData2;
+};
+typedef struct dataPackage DataPackage;
+DataPackage packageToSend = {0,0,0,0};
+unsigned int packageCnt = 0;
 
 // Used to control whether this node is sending or receiving
 bool role = 0;
@@ -59,35 +73,106 @@ void loop() {
   byte req = nodeNumber | 0xF0;
   radio.stopListening();
   radio.write(&req, sizeof(byte));   
+  radio.startListening(); 
   Serial.print(F("Now sending: "));  
   Serial.print(req);     
   Serial.print(F("... Waiting for ack... "));     
 
   // CLEAR CHANNEL MAYBE!!!
 
-  // Change channel
-  switchToPrivateCH();
   // Wait for ack
-  radio.startListening(); 
-  // Read ack
+  bool privateSession = false;
   if (waitForDataTO()) {                                    
       Serial.println(F("Did not receive ack: FAILED!"));
   }else{
       byte ack = 0;            
       radio.read( &ack, sizeof(byte) );
+      delay(20);
       if (req == ack) {
         Serial.println(F("Connection Established: SUCCESS!"));
+        privateSession = true;
       } else {
         Serial.println(F("Received wrong ack: FAILED!"));
       }  
   }
-
-  // Change to broadcast channel
   radio.stopListening();
-  switchToBroadcastCH();
+
+  if(privateSession) {
+    // Wait for host the change channel and clear buffer
+    //delay(50); 
+    // Change channel
+    switchToPrivateCH();
+    // Clear read buffer
+    byte someCrap;
+    while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
+    radio.startListening(); 
+
+    while(privateSession) {
+      // Wait for CMD 
+      if (waitForDataTO()) {                                    
+        Serial.println(F("Did not receive CMD: FAILED!"));
+        privateSession = false;
+        Serial.println(F("--- RESETTING ---"));
+      }else{
+        // Read command
+        command cmd = NoCMD;
+        radio.read( &cmd, sizeof(cmd) );
+        Serial.print(F("Received CMD: "));
+        Serial.print(cmd);
+        Serial.print(F(" ... "));
+        delay(20);
+
+        // Test cmd
+        switch (cmd) {
+          case Stop:
+            privateSession = false;
+            Serial.println(F("Stop message! Closing connection: SUCCESS!"));
+          break;
+          case Get:
+            // Do nothing
+            // Maybe update data
+            // Read sensors
+          break;
+          default: 
+            privateSession = false;
+            Serial.println(F(" Wrong CMD received: FAILED!"));
+          break;
+        }
+
+        if(privateSession) {
+          // Set up data to send
+          packageToSend.slaveID = nodeNumber;
+          packageToSend.pkID = packageCnt;
+          packageToSend.someData1 = 1337;
+          packageToSend.someData2 = 12321;
+          // Send data
+          Serial.print(F("Sending data package: "));
+          Serial.print(packageCnt);
+          Serial.print(F(" ... "));
+          radio.stopListening();
+          if(!radio.write( &packageToSend, sizeof(packageToSend))) {
+            Serial.println(F("FAILED!"));
+          } else {
+            Serial.println(F("SUCCESS!"));
+            packageCnt++;
+          }
+          radio.startListening();
+        }
+      }
+    }
+
+    // Change channel
+    radio.stopListening();
+    switchToBroadcastCH();
+    radio.startListening(); 
+  }
+
+
 
   delay(2000);
-  
+
+  //Serial.println(F("okay"));
+}  
   
 /****************** Ping Out Role ***************************/  
 /*
@@ -163,7 +248,7 @@ if (role == 1)  {
 
 
 /****************** Change Roles via Serial Commands ***************************/
-
+/*
   if ( Serial.available() )
   {
     char c = toupper(Serial.read());
@@ -182,7 +267,7 @@ if (role == 1)  {
 
 
 } // Loop
-
+*/
 void switchToPrivateCH() {
   // Set channel
   radio.setChannel(PRIVATE_CH);

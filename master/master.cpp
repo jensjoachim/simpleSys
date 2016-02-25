@@ -169,8 +169,7 @@ int main(int argc, char** argv){
 				radio.read( &got_req, sizeof(char) );
 			}
 			
-			printf("Got request: %i... Sending ack... \n",got_req);
-			  //cout << "Tjaa" << endl;
+			printf("Got request: %i... Sending ack... Changing channel...\n",got_req);
 			
 			
 			radio.stopListening();
@@ -184,13 +183,11 @@ int main(int argc, char** argv){
 			// Wait for the other side to clear buffer
 			delay(100);
 			
-			// MAYBE CLEAR READ BUFFER
+			// Clear buffer
 			byte someCrap;
 			while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
 		
-			
-			// Wait for incoming data
-			//radio.startListening();
+
 			
 			int dataCnt = 10;
 			
@@ -199,43 +196,25 @@ int main(int argc, char** argv){
 				command cmd = Get;
 				radio.write( &cmd, sizeof(cmd) );
 				radio.startListening();
-				
-				// Receive data package
-				/*
-				unsigned long started_waiting_at = millis();
-				bool timeout = false;
-				while ( ! radio.available() && ! timeout ) {
-					if (millis() - started_waiting_at > 500 )
-						timeout = true;
-				}
-				*/
 
 				//if ( timeout )
-				if ( waitForDataTO() )
-				{
-					printf("Failed, response timed out.\n");
-				}
-				else
-				{
+				if ( waitForDataTO() ) {
+					printf("Could not receive any data: FAILED!\n");
+					radio.stopListening();
+					break;
+				} else {
 					// Grab the response, compare, and send to debugging spew
 					DataPackage packageToSend;
 					radio.read( &packageToSend, sizeof(packageToSend) );
 					
-
-					
 					// Spew it
-					printf("Slave ID: %u,  Package ID: %u\n",packageToSend.slaveID,packageToSend.pkID);
-					//printf("Package ID: %u\n",packageToSend.pkID);
-					//printf("Data1: %i\n",packageToSend.someData1);
-					//printf("Data2: %i\n",packageToSend.someData2);
-
+					//printf("Data received::: Slave ID: %u,  Package ID: %u\n",packageToSend.slaveID,packageToSend.pkID);
+					printf("Data received::: Slave ID: %u,  Light: %i, Temperature: %i\n",
+						packageToSend.slaveID,packageToSend.someData1,packageToSend.someData2);
 				}
 				
 				delay(20);
 				radio.stopListening();
-				//command cmd = Stop;
-				//command cmd = NoCMD;
-				
 			}
 			
 			command cmd = Stop;
@@ -358,7 +337,7 @@ int main(int argc, char** argv){
 		
 		}
 		*/
-		delay(200); // release pressure from CPU
+		delay(100); // release pressure from CPU
 
 	} // forever loop
 

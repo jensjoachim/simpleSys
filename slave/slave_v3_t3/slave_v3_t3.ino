@@ -8,12 +8,6 @@
 #include <SPI.h>
 #include "RF24.h"
 
-
-#include <avr/sleep.h>
-#include <avr/power.h>
-#include <avr/wdt.h>
-
-
 /****************** User Config ***************************/
 /***      Set this radio as radio number 0 or 1         ***/
 bool radioNumber;
@@ -24,12 +18,12 @@ RF24 radio(7,8);
 
 enum command { NoCMD, Stop, Get };
 
-byte addresses[][6] = {"1Node","2Node"}; 
+byte addresses[][6] = {"1Node","2Node"};
 
 #define BROAD_CH    0
 #define PRIVATE_CH  10
 
-byte nodeNumber = 3;
+byte nodeNumber = 5;
 
 // Data structures
 struct dataPackage
@@ -46,53 +40,10 @@ unsigned int packageCnt = 0;
 // Used to control whether this node is sending or receiving
 bool role = 0;
 
-
-//WATCHDOG
-volatile int f_wdt=1;
- 
-ISR(WDT_vect) {
-  if(f_wdt == 0) {
-    f_wdt=1;
-  } else {
-    //Serial.println("WDT Overrun!!!");
-  }
-}
- 
-void enterSleep(void) {
-  radio.powerDown();
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);   /* EDIT: could also use SLEEP_MODE_PWR_DOWN for lowest power consumption. */
-  sleep_enable();
- 
-  /* Now enter sleep mode. */
-  sleep_mode();
- 
-  /* The program will continue from here after the WDT timeout*/
-  sleep_disable(); /* First thing to do is disable sleep. */
- 
-  /* Re-enable the peripherals. */
-  power_all_enable();
-  radio.powerUp();
-}
-
-
 void setup() {
   Serial.begin(115200);
   Serial.println(F("RF24/examples/GettingStarted"));
   Serial.println(F("*** PRESS 'T' to begin transmitting to the other node"));
-
-
-  //WATCHDOG
-  /* Clear the reset flag. */
-  MCUSR &= ~(1<<WDRF);
-  /* In order to change WDE or the prescaler, we need to
-   * set WDCE (This will allow updates for 4 clock cycles).
-   */
-  WDTCSR |= (1<<WDCE) | (1<<WDE);
-  /* set new watchdog timeout prescaler value */
-  WDTCSR = 1<<WDP0 | 1<<WDP3; /* 8.0 seconds */
-  /* Enable the WD interrupt (note no reset). */
-  WDTCSR |= _BV(WDIE);
-  
   
   radio.begin();
 
@@ -192,10 +143,8 @@ void loop() {
           // Set up data to send
           packageToSend.slaveID = nodeNumber;
           packageToSend.pkID = packageCnt;
-          packageToSend.someData1 = readLight();
-          packageToSend.someData2 = readTemp();
-          //packageToSend.someData1 = 1337;
-          //packageToSend.someData2 = 12321;
+          packageToSend.someData1 = 1337;
+          packageToSend.someData2 = 12321;
           // Send data
           Serial.print(F("Sending data package: "));
           Serial.print(packageCnt);
@@ -206,11 +155,6 @@ void loop() {
           } else {
             Serial.println(F("SUCCESS!"));
             packageCnt++;
-            Serial.print(F("Light: "));
-            Serial.print(packageToSend.someData1);
-            Serial.print(F(", "));
-            Serial.print(F("Temperature: "));
-            Serial.println(packageToSend.someData2);
           }
           radio.startListening();
         }
@@ -223,11 +167,11 @@ void loop() {
     radio.startListening(); 
   }
 
-  f_wdt = 0;
-  enterSleep();
+
+
   delay(2000);
 
-  Serial.println(F("okay"));
+  //Serial.println(F("okay"));
 }  
   
 /****************** Ping Out Role ***************************/  
@@ -324,15 +268,6 @@ if (role == 1)  {
 
 } // Loop
 */
-
-int readLight() {
-  return analogRead(A1);
-}
-
-int readTemp() {
-  return analogRead(A0);
-}
-
 void switchToPrivateCH() {
   // Set channel
   radio.setChannel(PRIVATE_CH);
