@@ -75,8 +75,6 @@ RF24 radio(22,0);
 //RF24 radio(59,0);
 
 /********** User Config *********/
-// Assign a unique identifier for this node, 0 or 1
-//bool radioNumber = 1;
 
 enum command { NoCMD, Stop, Get };
 
@@ -90,6 +88,7 @@ struct dataPackage
   unsigned short int pkID;
   short int someData1;
   short int someData2;
+  short int someData3;
 };
 typedef struct dataPackage DataPackage;
 
@@ -142,18 +141,20 @@ int main(int argc, char** argv){
   }
   */
 /***********************************/
-  // This simple sketch opens two pipes for these two nodes to communicate
-  // back and forth.
 
-  /*
-    if ( !radioNumber )    {
-      radio.openWritingPipe(pipes[0]);
-      radio.openReadingPipe(1,pipes[1]);
-    } else {
-		*/
-      radio.openWritingPipe(pipes[1]);
-      radio.openReadingPipe(1,pipes[0]);
-    //}
+	// Set up som time variables
+	unsigned long serviceFrequency = 200;	
+	unsigned long serviceNextTime = millis() - serviceFrequency;
+	
+	unsigned int meanCntMax = 20;
+	int mean[meanCntMax] = { };
+	unsigned int meanCnt = 0;
+	
+	
+	
+	// Start pipes
+    radio.openWritingPipe(pipes[1]);
+    radio.openReadingPipe(1,pipes[0]);
 	
 	radio.startListening();
 	
@@ -163,6 +164,9 @@ int main(int argc, char** argv){
 		// Wait for request
 		if ( radio.available() )
 		{
+			// Reset service
+			serviceNextTime = millis() - serviceFrequency;
+			
 			// Fetch the last request
 			char got_req;
 			while(radio.available()){
@@ -170,7 +174,6 @@ int main(int argc, char** argv){
 			}
 			
 			printf("Got request: %i... Sending ack... Changing channel...\n",got_req);
-			
 			
 			radio.stopListening();
 			
@@ -186,18 +189,14 @@ int main(int argc, char** argv){
 			// Clear buffer
 			byte someCrap;
 			while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
-		
-
 			
-			int dataCnt = 10;
-			
+			int dataCnt = 1000;
 			for(int i = 1; i <= dataCnt; i++) {
 				// Send command
 				command cmd = Get;
 				radio.write( &cmd, sizeof(cmd) );
 				radio.startListening();
 
-				//if ( timeout )
 				if ( waitForDataTO() ) {
 					printf("Could not receive any data: FAILED!\n");
 					radio.stopListening();
@@ -208,9 +207,27 @@ int main(int argc, char** argv){
 					radio.read( &packageToSend, sizeof(packageToSend) );
 					
 					// Spew it
-					//printf("Data received::: Slave ID: %u,  Package ID: %u\n",packageToSend.slaveID,packageToSend.pkID);
-					printf("Data received::: Slave ID: %u,  Light: %i, Temperature: %i\n",
-						packageToSend.slaveID,packageToSend.someData1,packageToSend.someData2);
+					/*
+					printf("Data received::: Slave ID: %u, Light: %i, Temperature: %i, Moisture: %i\n",
+						packageToSend.slaveID,packageToSend.someData1,packageToSend.someData2,packageToSend.someData3);
+					*/
+					
+					// Do service here
+					if (serviceNextTime < millis()) {
+						serviceNextTime = serviceNextTime + serviceFrequency;
+						printf("Serviceing!\n");
+						mean[meanCnt] = packageToSend.someData1;
+						meanCnt++;
+						if (meanCnt >= meanCntMax) { meanCnt = 0; }
+						int sum = 0;
+						for (unsigned int j = 0; j <= meanCntMax; j++) {
+							sum = sum + mean[j];
+					
+						}
+						sum = sum/meanCntMax;
+						printf("Light mean : %i\n",sum);
+					}
+					
 				}
 				
 				delay(20);
@@ -220,37 +237,6 @@ int main(int argc, char** argv){
 			command cmd = Stop;
 			radio.write( &cmd, sizeof(cmd) );
 			radio.startListening();
-			
-			
-			/*
-			for(int i = 0; i < 3; i++) {
-				unsigned long started_waiting_at = millis();
-				bool timeout = false;
-				while ( ! radio.available() && ! timeout ) {
-					if (millis() - started_waiting_at > 500 )
-						timeout = true;
-				}
-
-				if ( timeout )
-				{
-					printf("Failed, response timed out.\n");
-				}
-				else
-				{
-					// Grab the response, compare, and send to debugging spew
-					DataPackage packageToSend;
-					radio.read( &packageToSend, sizeof(packageToSend) );
-
-					
-					// Spew it
-					printf("Slave ID: %u\n",packageToSend.slaveID);
-					printf("Package ID: %u\n",packageToSend.pkID);
-					printf("Data1: %i\n",packageToSend.someData1);
-					printf("Data2: %i\n",packageToSend.someData2);
-
-				}
-			}
-			*/
 	
 			// Change channel
 			switchToBroadcastCH();

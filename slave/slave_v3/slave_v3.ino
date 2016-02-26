@@ -38,6 +38,7 @@ struct dataPackage
   unsigned int pkID;
   int someData1;
   int someData2;
+  int someData3;
 };
 typedef struct dataPackage DataPackage;
 DataPackage packageToSend = {0,0,0,0};
@@ -116,8 +117,9 @@ void setup() {
 
 void loop() {
 
-/******* Broadcast messages ************/
-
+  // Start sequence
+  bool succesfulRun = false;
+  
   // Send request on broad cast channel
   byte req = nodeNumber | 0xF0;
   radio.stopListening();
@@ -126,8 +128,6 @@ void loop() {
   Serial.print(F("Now sending: "));  
   Serial.print(req);     
   Serial.print(F("... Waiting for ack... "));     
-
-  // CLEAR CHANNEL MAYBE!!!
 
   // Wait for ack
   bool privateSession = false;
@@ -175,6 +175,7 @@ void loop() {
         switch (cmd) {
           case Stop:
             privateSession = false;
+            succesfulRun = true;
             Serial.println(F("Stop message! Closing connection: SUCCESS!"));
           break;
           case Get:
@@ -194,6 +195,7 @@ void loop() {
           packageToSend.pkID = packageCnt;
           packageToSend.someData1 = readLight();
           packageToSend.someData2 = readTemp();
+          packageToSend.someData3 = readMoisture();
           //packageToSend.someData1 = 1337;
           //packageToSend.someData2 = 12321;
           // Send data
@@ -221,13 +223,23 @@ void loop() {
     radio.stopListening();
     switchToBroadcastCH();
     radio.startListening(); 
+  } 
+
+  if (succesfulRun) {
+    // Take a break
+    /*
+    f_wdt = 0;
+    enterSleep();
+    */
+  
+    delay(5000);
+  } else {
+    // Try again
+    // Maybe wait longer if another slave node is serviced...
+    delay(1000);
   }
 
-  f_wdt = 0;
-  enterSleep();
-  delay(2000);
-
-  Serial.println(F("okay"));
+  //Serial.println(F("okay"));
 }  
   
 /****************** Ping Out Role ***************************/  
@@ -331,6 +343,10 @@ int readLight() {
 
 int readTemp() {
   return analogRead(A0);
+}
+
+int readMoisture() {
+  return analogRead(A2);
 }
 
 void switchToPrivateCH() {
