@@ -25,6 +25,9 @@ TMRh20 2014 - Updated to work with optimized RF24 Arduino library
 #include <string>
 #include <unistd.h>
 #include <RF24/RF24.h>
+#include <fstream>
+#include <cmath>
+
 
 using namespace std;
 typedef unsigned char byte;
@@ -101,6 +104,10 @@ const uint8_t pipes[][6] = {"1Node","2Node"};
 void switchToPrivateCH();
 void switchToBroadcastCH();
 bool waitForDataTO();
+int getMean(int sampleMean[], int samples);
+void service();
+void log(unsigned long time, int slaveID, string text,int value);
+void standard_deviation(float &mean, float &std, int data[], int n);
 
 
 int main(int argc, char** argv){
@@ -141,14 +148,6 @@ int main(int argc, char** argv){
   }
   */
 /***********************************/
-
-	// Set up som time variables
-	unsigned long serviceFrequency = 200;	
-	unsigned long serviceNextTime = millis() - serviceFrequency;
-	
-	unsigned int meanCntMax = 20;
-	int mean[meanCntMax] = { };
-	unsigned int meanCnt = 0;
 	
 	
 	
@@ -164,8 +163,6 @@ int main(int argc, char** argv){
 		// Wait for request
 		if ( radio.available() )
 		{
-			// Reset service
-			serviceNextTime = millis() - serviceFrequency;
 			
 			// Fetch the last request
 			char got_req;
@@ -190,53 +187,7 @@ int main(int argc, char** argv){
 			byte someCrap;
 			while(radio.available()){ radio.read( &someCrap, sizeof(someCrap) ); }
 			
-			int dataCnt = 1000;
-			for(int i = 1; i <= dataCnt; i++) {
-				// Send command
-				command cmd = Get;
-				radio.write( &cmd, sizeof(cmd) );
-				radio.startListening();
-
-				if ( waitForDataTO() ) {
-					printf("Could not receive any data: FAILED!\n");
-					radio.stopListening();
-					break;
-				} else {
-					// Grab the response, compare, and send to debugging spew
-					DataPackage packageToSend;
-					radio.read( &packageToSend, sizeof(packageToSend) );
-					
-					// Spew it
-					/*
-					printf("Data received::: Slave ID: %u, Light: %i, Temperature: %i, Moisture: %i\n",
-						packageToSend.slaveID,packageToSend.someData1,packageToSend.someData2,packageToSend.someData3);
-					*/
-					
-					// Do service here
-					if (serviceNextTime < millis()) {
-						serviceNextTime = serviceNextTime + serviceFrequency;
-						printf("Serviceing!\n");
-						mean[meanCnt] = packageToSend.someData1;
-						meanCnt++;
-						if (meanCnt >= meanCntMax) { meanCnt = 0; }
-						int sum = 0;
-						for (unsigned int j = 0; j <= meanCntMax; j++) {
-							sum = sum + mean[j];
-					
-						}
-						sum = sum/meanCntMax;
-						printf("Light mean : %i\n",sum);
-					}
-					
-				}
-				
-				delay(20);
-				radio.stopListening();
-			}
-			
-			command cmd = Stop;
-			radio.write( &cmd, sizeof(cmd) );
-			radio.startListening();
+			service();
 	
 			// Change channel
 			switchToBroadcastCH();
@@ -245,89 +196,183 @@ int main(int argc, char** argv){
 		}
 
 		
-		/*
-		if (role == role_ping_out)
-		{
-			// First, stop listening so we can talk.
-			radio.stopListening();
-
-			// Take the time, and send it.  This will block until complete
-
-			printf("Now sending...\n");
-			unsigned long time = millis();
-
-			bool ok = radio.write( &time, sizeof(unsigned long) );
-
-			if (!ok){
-				printf("failed.\n");
-			}
-			// Now, continue listening
-			radio.startListening();
-
-			// Wait here until we get a response, or timeout (250ms)
-			unsigned long started_waiting_at = millis();
-			bool timeout = false;
-			while ( ! radio.available() && ! timeout ) {
-				if (millis() - started_waiting_at > 200 )
-					timeout = true;
-			}
-
-
-			// Describe the results
-			if ( timeout )
-			{
-				printf("Failed, response timed out.\n");
-			}
-			else
-			{
-				// Grab the response, compare, and send to debugging spew
-				unsigned long got_time;
-				radio.read( &got_time, sizeof(unsigned long) );
-
-				// Spew it
-				printf("Got response %lu, round-trip delay: %lu\n",got_time,millis()-got_time);
-			}
-			sleep(1);
-		}
-
-		//
-		// Pong back role.  Receive each packet, dump it out, and send it back
-		//
-
-		if ( role == role_pong_back )
-		{
-			
-			// if there is data ready
-			if ( radio.available() )
-			{
-				// Dump the payloads until we've gotten everything
-				unsigned long got_time;
-
-				// Fetch the payload, and see if this was the last one.
-				while(radio.available()){
-					radio.read( &got_time, sizeof(unsigned long) );
-				}
-				radio.stopListening();
-				
-				radio.write( &got_time, sizeof(unsigned long) );
-
-				// Now, resume listening so we catch the next packets.
-				radio.startListening();
-
-				// Spew it
-				printf("Got payload(%d) %lu...\n",sizeof(unsigned long), got_time);
-				
-				delay(925); //Delay after payload responded to, minimize RPi CPU time
-				
-			}
-		
-		}
-		*/
 		delay(100); // release pressure from CPU
 
 	} // forever loop
 
   return 0;
+}
+
+void service() {
+	
+	// Max service time for TO
+	unsigned long maxServiceTime = millis() + 10*60*1000; // 10 min
+	
+	// Initialise arrays for service
+	int serviceDataSize = 16;
+	int serviceDataCnt = 0;
+	int serviceLight[serviceDataSize] = {};
+	int serviceTemp[serviceDataSize] = {};
+	int serviceMoist[serviceDataSize] = {};
+	
+	// Initialise service debug
+	unsigned long printPeriod = 1*1000; 	// 1 sec
+	unsigned long printNext = millis() + printPeriod;
+	
+	// Take a mean of every data sampled beetween service
+	int samples = 0;
+	int sampleMeanBuffSize = 50;
+	int sampleMeanLight[sampleMeanBuffSize] = {};
+	int sampleMeanTemp[sampleMeanBuffSize] = {};
+	int sampleMeanMoist[sampleMeanBuffSize] = {};
+	
+	// Take log of the first data when enter service
+	bool logData = true;
+	
+	// Set up som time variables
+	unsigned long serviceFrequency = 500;	
+	unsigned long serviceNextTime = millis() + serviceFrequency;
+	
+	//int dataCnt = 30000;
+	//for(int i = 1; i <= dataCnt; i++) {
+	while (true) {
+		// Send command
+		command cmd = Get;
+		radio.write( &cmd, sizeof(cmd) );
+		radio.startListening();
+
+		if ( waitForDataTO() ) {
+			printf("Could not receive any data: FAILED!\n");
+			radio.stopListening();
+			break;
+		} else {
+			// Receive package
+			DataPackage packageToSend;
+			radio.read( &packageToSend, sizeof(packageToSend) );
+			
+			// Print raw data
+			// printf("Data received::: Slave ID: %u, Light: %i, Temperature: %i, Moisture: %i\n",
+			//	packageToSend.slaveID,packageToSend.someData1,packageToSend.someData2,packageToSend.someData3);
+			
+			// Put in mean array
+			sampleMeanLight[samples] = packageToSend.someData1;
+			sampleMeanTemp[samples] = packageToSend.someData2;
+			sampleMeanMoist[samples] = packageToSend.someData3;
+			
+			// Increment samples
+			samples = samples + 1;
+			if (samples >= sampleMeanBuffSize) {
+				printf("CRITICAL ERROR! samples was higher than buffer size\n");
+			}
+			
+			// Do service here
+			if (serviceNextTime < millis()) {
+				// Save start time
+				unsigned long serviceStartTime = millis();
+				
+				// Calculate mean of all sensor values
+				int light = getMean(sampleMeanLight,samples);
+				int temp =  getMean(sampleMeanTemp,samples);
+				int moist = getMean(sampleMeanMoist,samples);
+				// Load it to data array
+				serviceLight[serviceDataCnt] = light;
+				serviceTemp[serviceDataCnt] = temp;
+				serviceMoist[serviceDataCnt] = moist;
+				// Increment counter
+				serviceDataCnt = serviceDataCnt + 1;
+				if (serviceDataCnt >= serviceDataSize) {
+					serviceDataCnt = 0;
+				}
+				
+				// Log
+				if (logData == true) {
+					logData = false;
+					log(serviceStartTime,packageToSend.slaveID,"light",light); 
+					log(serviceStartTime,packageToSend.slaveID,"temp ",temp); 
+					log(serviceStartTime,packageToSend.slaveID,"moist",moist); 
+				}
+				
+				// Do other stuff
+
+				
+				
+				// Check if anything needs to be printed
+				if (millis() > printNext) {
+					// Print info for this run!
+					printf("Serviceing! Samples: %i\n",samples);
+					printf("Mean: Light: %i, Temp: %i, Moist: %i\n"
+						,light,temp,moist);
+					
+					// Print calculated stuff
+					
+					float mean;
+					float std;
+					standard_deviation(mean, std, serviceLight, serviceDataSize);
+					printf("TEST! Mean: %.2f, STD: %.2f\n",mean,std);
+						
+						
+					// Print next
+					printNext = printNext + printPeriod;
+				}
+				
+				// Next service in
+				serviceNextTime = serviceNextTime + serviceFrequency;
+				// Reset samples
+				samples = 0;
+			}
+			
+		}
+		
+		delay(20);
+		radio.stopListening();
+		
+		if (maxServiceTime < millis()) {
+			printf("WARNING: Max service time reached!\n"); 
+			break;
+		}
+	}
+	
+	command cmd = Stop;
+	radio.write( &cmd, sizeof(cmd) );
+	radio.startListening();
+}
+
+void standard_deviation(float &mean, float &std, int data[], int n) {
+    mean = 0.0;
+	int sum_deviation=0.0;
+    int i;
+    for(i=0; i<n;++i)
+    {
+        mean+=data[i];
+    }
+    mean=mean/n;
+    for(i=0; i<n;++i) {
+		sum_deviation+=((float)data[i]-mean)*((float)data[i]-mean);
+	}
+    std = sqrt(sum_deviation/n);
+}
+
+void log(unsigned long time, int slaveID, string text, int value) {
+	std::ofstream outfile;
+	string logFile = "log_s_";
+	std::string String = static_cast<ostringstream*>( &(ostringstream() << slaveID) )->str();
+	logFile = logFile + String;
+	char logFile_c[20];
+	strcpy(logFile_c, logFile.c_str());
+	FILE * pFileTXT;
+	pFileTXT = fopen (logFile_c,"a");
+	// Make text here
+	fprintf(pFileTXT, "%lu, %i, %s, %i\n", time, slaveID, text.c_str(), value);
+	// Close
+	fclose (pFileTXT);
+}
+
+int getMean(int sampleMean[], int samples){
+	int sum = 0;
+	for (int i = 0; i < samples; i++) {
+		sum = sum + sampleMean[i];
+	}
+	return sum/samples;
 }
 
 void switchToPrivateCH() {
